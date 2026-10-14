@@ -1,76 +1,81 @@
 # TemporalGuard-RAG Requirements
 # Financial Analysis with Temporal Consistency
+# Python 3.13-compatible dependency set with LangChain 1.x / LangGraph 1.x
 
 # Core LLM and RAG
-langchain==0.1.10
-langchain-openai==0.0.6
-langchain-community==0.0.24
-openai==1.12.0
-tiktoken==0.5.2
+langchain>=1.2,<2
+langchain-core>=1.2,<2
+langchain-openai>=1.1,<2
+langchain-community>=0.4,<1
+langchain-ollama>=1.1,<2
+langchain-text-splitters>=1.1,<2
+langgraph>=1.0,<2
+openai>=2.0,<3
+tiktoken>=0.9,<1
 
 # Vector Database
-chromadb==0.4.22
+chromadb>=1.0,<2
 
 # Embeddings
-sentence-transformers==2.3.1
-transformers==4.37.2
-torch==2.1.2
+sentence-transformers>=5.0,<6
+transformers>=5.0,<6
+torch>=2.6.0
 
 # Data Processing
-pandas==2.1.4
-numpy==1.26.3
+pandas>=2.2,<3
+numpy>=2.0,<3
 
 # SEC and Financial Data
-sec-edgar-downloader==5.0.0
-yfinance==0.2.35
-beautifulsoup4==4.12.3
-lxml==5.1.0
-xmltodict==0.13.0
+sec-edgar-downloader>=5.0.0
+yfinance>=0.2.40
+beautifulsoup4>=4.12.3
+lxml>=5.1.0
+xmltodict>=0.13.0
 
 # Web Framework
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
+fastapi>=0.115.0,<1
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0,<3
+pydantic-settings>=2.1.0
 
 # Streamlit UI
-streamlit==1.30.0
+streamlit>=1.45.0
 
 # HTTP Requests
-requests==2.31.0
-aiohttp==3.9.3
+requests>=2.31.0
+aiohttp>=3.9.3
 
 # Data Validation
-marshmallow==3.20.2
+marshmallow>=3.20.2
 
 # Anomaly Detection
-scikit-learn==1.4.0
+scikit-learn>=1.4.0
 
 # Search
-rank-bm25==0.2.2
+rank-bm25>=0.2.2
 
 # Testing
-pytest==7.4.4
-pytest-asyncio==0.23.3
-pytest-cov==4.1.0
+pytest>=8.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
 
 # Utilities
-python-dotenv==1.0.0
-tqdm==4.66.1
-tenacity==8.2.3
+python-dotenv>=1.0.0
+tqdm>=4.66.1
+tenacity>=8.2.3
 
 # Logging
-loguru==0.7.2
+loguru>=0.7.2
 
 # Type Checking
-mypy==1.8.0
-types-requests==2.31.0.20240106
+mypy>=1.8.0
+types-requests>=2.31.0
 
 # Code Quality
-black==24.1.1
-isort==5.13.2
-flake8==7.0.0
+black>=24.1.1
+isort>=5.13.2
+flake8>=7.0.0
 
 # Documentation
-mkdocs==1.5.3
-mkdocs-material==9.5.3
+mkdocs>=1.5.3
+mkdocs-material>=9.5.3

@@ -222,17 +222,19 @@ class FinancialDataLoader:
         """Load data from pre-extracted metrics CSV."""
         try:
             df = pd.read_csv(metrics_path)
-            
-            for metric in df['metric'].unique():
-                metric_df = df[df['metric'] == metric].sort_values('end_date')
+
+            for metric, metric_df in df.groupby('metric', sort=False):
+                metric_df = metric_df.sort_values('end_date')
                 values = {}
-                for _, row in metric_df.iterrows():
-                    date_key = str(row['end_date'])[:10]
+
+                for row in metric_df.itertuples(index=False):
+                    date_key = str(getattr(row, 'end_date', ''))[:10]
                     values[date_key] = {
-                        "value": row['value'],
-                        "filed": str(row['filed_date'])[:10] if pd.notna(row['filed_date']) else None,
-                        "form": row.get('form', '10-K')
+                        "value": getattr(row, 'value'),
+                        "filed": str(getattr(row, 'filed_date', ''))[:10] if pd.notna(getattr(row, 'filed_date', None)) else None,
+                        "form": getattr(row, 'form', '10-K')
                     }
+
                 data["time_series"][metric] = values
             
         except Exception as e:

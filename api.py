@@ -63,7 +63,7 @@ class QueryRequest(BaseModel):
             "example": {
                 "query": "What was Apple's revenue growth in fiscal 2023?",
                 "ticker": "AAPL",
-                "analysis_date": null,
+                "analysis_date": None,
                 "options": {
                     "include_calculations": True,
                     "verbose": False

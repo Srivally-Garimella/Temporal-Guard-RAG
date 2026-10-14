@@ -264,6 +264,14 @@ Keep it simple and readable."""
             'metadata': {}
         }
         
+        # ═══════════════════════════════════════════════════════════════
+        # STAGE 1: Temporal Validation (Mandatory for all queries)
+        # ═══════════════════════════════════════════════════════════════
+        update_progress(1, "Temporal Validation")
+            
+        temporal_result = self._run_temporal_validation(query, analysis_date)
+        results['stages']['temporal'] = temporal_result
+
         # Classify query and route appropriately
         query_type = self._classify_query(query)
         results['metadata']['query_type'] = query_type
@@ -277,7 +285,8 @@ Keep it simple and readable."""
                 analysis_date=analysis_date,
                 verbose=verbose,
                 progress_callback=progress_callback,
-                start_time=start_time
+                start_time=start_time,
+                temporal_result=temporal_result
             )
         
         if verbose:
@@ -289,16 +298,8 @@ Keep it simple and readable."""
             print(f"Analysis Date: {analysis_date}")
             print(f"{'='*60}\n")
             
-        # ═══════════════════════════════════════════════════════════════
-        # STAGE 1: Temporal Validation
-        # ═══════════════════════════════════════════════════════════════
-        update_progress(1, "Temporal Validation")
-            
-        temporal_result = self._run_temporal_validation(query, analysis_date)
-        results['stages']['temporal'] = temporal_result
-        
+        status = "✅ VALID" if temporal_result['is_valid'] else "❌ INVALID"
         if verbose:
-            status = "✅ VALID" if temporal_result['is_valid'] else "❌ INVALID"
             print(f"Status: {status}")
             if not temporal_result['is_valid']:
                 print("⚠️ Temporal violations detected - proceeding with caution")
@@ -596,6 +597,11 @@ Keep it simple and readable."""
     def _manual_synthesis(self, query: str, analysis_date: str, 
                            stages: Dict, agent_outputs: List[str]) -> str:
         """Manual synthesis when LLM unavailable - keeps it simple."""
+        # Check for severe temporal violation first
+        temporal = stages.get('temporal', {})
+        if not temporal.get('is_valid', True) and "FUTURE" in temporal.get('bias_detection', '').upper():
+            return f"⚠️ TEMPORAL VIOLATION DETECTED: {temporal.get('bias_detection', 'This query references data that would not be available at the analysis date.')}"
+
         lines = []
         
         # Direct answer attempt from calculations
@@ -620,7 +626,6 @@ Keep it simple and readable."""
             lines.append("Limited source documents available.")
         
         # Temporal note (brief)
-        temporal = stages.get('temporal', {})
         if not temporal.get('is_valid', True):
             lines.append("⚠️ Note: Query may reference future data.")
         
@@ -633,7 +638,8 @@ Keep it simple and readable."""
                                   analysis_date: str,
                                   verbose: bool = True,
                                   progress_callback=None,
-                                  start_time=None) -> Dict[str, Any]:
+                                  start_time=None,
+                                  temporal_result: Dict = None) -> Dict[str, Any]:
         """
         Process projection/forecast/historical extreme queries through Analysis Agent.
         
@@ -664,7 +670,9 @@ Keep it simple and readable."""
             'query': query,
             'ticker': ticker,
             'analysis_date': analysis_date,
-            'stages': {},
+            'stages': {
+                'temporal': temporal_result or {'is_valid': True}
+            },
             'final_answer': None,
             'metadata': {
                 'query_type': query_type,
@@ -771,6 +779,11 @@ Keep it simple and readable."""
             "",
             main_output,
         ]
+        
+        # Add temporal warning if invalid
+        if temporal_result and not temporal_result.get('is_valid', True):
+            final_lines.insert(3, f"⚠️ TEMPORAL WARNING: {temporal_result.get('bias_detection', 'Potential look-ahead bias detected.')}")
+            final_lines.insert(4, "")
         
         # Add market context if available
         market_stage = results['stages'].get('market_context', {})

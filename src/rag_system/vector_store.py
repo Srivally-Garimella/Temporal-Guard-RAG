@@ -136,72 +136,78 @@ class TemporalVectorStore:
         
         # Load chunks
         logger.info(f"Loading chunks from {chunks_path}...")
-        chunks = []
-        with open(chunks_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                chunks.append(json.loads(line))
-                
+
         # Load embeddings
         logger.info(f"Loading embeddings from {embeddings_path}...")
         embeddings = np.load(embeddings_path)
+
+        with open(chunks_path, 'r', encoding='utf-8') as chunk_counter:
+            chunk_count = sum(1 for _ in chunk_counter)
+
+        if len(embeddings) != chunk_count:
+            raise ValueError(f"Mismatch: {chunk_count} chunks, {len(embeddings)} embeddings")
+
+        logger.info(f"Adding {len(embeddings)} chunks to vector store...")
         
-        if len(chunks) != len(embeddings):
-            raise ValueError(f"Mismatch: {len(chunks)} chunks, {len(embeddings)} embeddings")
-            
-        logger.info(f"Adding {len(chunks)} chunks to vector store...")
-        
-        # Prepare data for ChromaDB
-        ids = []
-        documents = []
-        metadatas = []
-        embedding_list = []
-        
-        for i, chunk in enumerate(chunks):
-            ids.append(chunk['chunk_id'])
-            documents.append(chunk['text'])
-            
-            # Convert filing_date to integer for temporal filtering
-            filing_date_str = str(chunk.get('filing_date', ''))
-            try:
-                filing_date_int = int(filing_date_str) if filing_date_str else 0
-            except ValueError:
-                filing_date_int = 0
-            
-            # Prepare metadata (ChromaDB has type restrictions)
-            metadata = {
-                'ticker': str(chunk.get('ticker', '')),
-                'filing_type': str(chunk.get('filing_type', '')),
-                'filing_date': filing_date_int,  # Integer for $lt comparisons
-                'filing_date_str': filing_date_str,  # String for display
-                'fiscal_year': str(chunk.get('fiscal_year', '')),
-                'fiscal_period': str(chunk.get('fiscal_period', '')),
-                'source_path': str(chunk.get('source_path', '')),
-                'chunk_index': int(chunk.get('chunk_index', 0)),
-                'chunk_hash': str(chunk.get('chunk_hash', ''))
-            }
-            metadatas.append(metadata)
-            embedding_list.append(embeddings[i].tolist())
-            
-        # Add to ChromaDB in batches
-        num_batches = (len(chunks) + batch_size - 1) // batch_size
-        
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(chunks))
-            
-            try:
+        # Avoid retaining the full memory footprint of the chunk corpus when
+        # ingesting to ChromaDB in batches. We only need a streaming window.
+        with open(chunks_path, 'r', encoding='utf-8') as chunks_file:
+            ids = []
+            documents = []
+            metadatas = []
+            embedding_list = []
+            processed_count = 0
+
+            for chunk_line in chunks_file:
+                chunk = json.loads(chunk_line)
+                processed_count += 1
+
+                if processed_count > len(embeddings):
+                    raise ValueError(f"Chunk count exceeds embedding count: {processed_count} > {len(embeddings)}")
+
+                ids.append(chunk['chunk_id'])
+                documents.append(chunk['text'])
+
+                filing_date_str = str(chunk.get('filing_date', ''))
+                try:
+                    filing_date_int = int(filing_date_str) if filing_date_str else 0
+                except ValueError:
+                    filing_date_int = 0
+
+                metadata = {
+                    'ticker': str(chunk.get('ticker', '')),
+                    'filing_type': str(chunk.get('filing_type', '')),
+                    'filing_date': filing_date_int,
+                    'filing_date_str': filing_date_str,
+                    'fiscal_year': str(chunk.get('fiscal_year', '')),
+                    'fiscal_period': str(chunk.get('fiscal_period', '')),
+                    'source_path': str(chunk.get('source_path', '')),
+                    'chunk_index': int(chunk.get('chunk_index', 0)),
+                    'chunk_hash': str(chunk.get('chunk_hash', ''))
+                }
+                metadatas.append(metadata)
+                embedding_list.append(embeddings[processed_count - 1].tolist())
+
+                if len(ids) >= batch_size:
+                    self.collection.add(
+                        ids=ids,
+                        embeddings=embedding_list,
+                        documents=documents,
+                        metadatas=metadatas
+                    )
+                    logger.info(f"Added batch of {len(ids)} chunks")
+                    ids = []
+                    documents = []
+                    metadatas = []
+                    embedding_list = []
+
+            if ids:
                 self.collection.add(
-                    ids=ids[start_idx:end_idx],
-                    embeddings=embedding_list[start_idx:end_idx],
-                    documents=documents[start_idx:end_idx],
-                    metadatas=metadatas[start_idx:end_idx]
+                    ids=ids,
+                    embeddings=embedding_list,
+                    documents=documents,
+                    metadatas=metadatas
                 )
-                
-                logger.info(f"Added batch {batch_idx + 1}/{num_batches} ({end_idx} total)")
-                
-            except Exception as e:
-                logger.error(f"Error adding batch {batch_idx + 1}: {e}")
-                raise
                 
         logger.info(f"✅ Vector store created with {self.collection.count()} chunks")
         
@@ -209,7 +215,7 @@ class TemporalVectorStore:
         config = {
             'collection_name': self.collection_name,
             'persist_dir': str(self.persist_dir),
-            'total_chunks': len(chunks),
+            'total_chunks': chunk_count,
             'created_at': datetime.now().isoformat(),
             'chunks_source': str(chunks_path),
             'embeddings_source': str(embeddings_path)

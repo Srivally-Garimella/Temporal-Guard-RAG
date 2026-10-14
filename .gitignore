@@ -86,24 +86,28 @@ data/evaluation/benchmark_results.json
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
-# ═══════════════════════════════════════════════════════════════
+# Frontend/node build outputs
+frontend/node_modules/
+frontend/dist/
+
+# Generated outputs / evaluation artifacts
+results/**/*.json
+
+# Temporary Windows office lock files
+~$*.docx
+
 # IDE
-# ═══════════════════════════════════════════════════════════════
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
-# ═══════════════════════════════════════════════════════════════
 # Jupyter Notebooks
-# ═══════════════════════════════════════════════════════════════
 .ipynb_checkpoints
 *.ipynb
 
-# ═══════════════════════════════════════════════════════════════
 # OS
-# ═══════════════════════════════════════════════════════════════
 .DS_Store
 .DS_Store?
 ._*
@@ -112,15 +116,11 @@ data/evaluation/benchmark_results.json
 ehthumbs.db
 Thumbs.db
 
-# ═══════════════════════════════════════════════════════════════
 # Logs
-# ═══════════════════════════════════════════════════════════════
 *.log
 logs/
 
-# ═══════════════════════════════════════════════════════════════
 # Models (large files)
-# ═══════════════════════════════════════════════════════════════
 models/
 *.ckpt
 *.pt
@@ -128,9 +128,7 @@ models/
 *.bin
 *.safetensors
 
-# ═══════════════════════════════════════════════════════════════
 # Misc
-# ═══════════════════════════════════════════════════════════════
 *.bak
 *.tmp
 *.temp

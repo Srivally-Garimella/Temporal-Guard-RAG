@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
 import logging
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,6 +34,23 @@ class MarketDataAgent:
         self.cache_ttl = 60  # Cache TTL in seconds
         logger.info("Initialized Market Data Agent")
     
+    def _cache_get(self, key: str):
+        """Return cached value if it is still fresh."""
+        cached = self.cache.get(key)
+        if cached is None:
+            return None
+
+        value, expires_at = cached
+        if time.monotonic() >= expires_at:
+            self.cache.pop(key, None)
+            return None
+
+        return value
+    
+    def _cache_set(self, key: str, value: Any):
+        """Store fetched payload with a TTL."""
+        self.cache[key] = (value, time.monotonic() + self.cache_ttl)
+    
     def get_live_price(self, ticker: str) -> Dict[str, Any]:
         """
         Get real-time stock price and daily change.
@@ -43,11 +61,16 @@ class MarketDataAgent:
         Returns:
             Dictionary with price data
         """
+        cache_key = f"live_price:{ticker.upper()}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        
         try:
             stock = yf.Ticker(ticker)
             info = stock.fast_info
             
-            return {
+            result = {
                 'ticker': ticker,
                 'price': round(info.last_price, 2) if info.last_price else None,
                 'previous_close': round(info.previous_close, 2) if info.previous_close else None,
@@ -58,6 +81,8 @@ class MarketDataAgent:
                 'timestamp': datetime.now().isoformat(),
                 'status': 'success'
             }
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Error fetching live price for {ticker}: {e}")
             return {
@@ -79,16 +104,23 @@ class MarketDataAgent:
         Returns:
             Dictionary with historical data
         """
+        cache_key = f"historical:{ticker.upper()}:{period}:{interval}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period=period, interval=interval)
             
             if hist.empty:
-                return {
+                result = {
                     'ticker': ticker,
                     'status': 'error',
                     'error': 'No data available'
                 }
+                self._cache_set(cache_key, result)
+                return result
             
             # Convert to records
             records = []
@@ -103,7 +135,7 @@ class MarketDataAgent:
                 })
             
             # Calculate summary stats
-            return {
+            result = {
                 'ticker': ticker,
                 'period': period,
                 'interval': interval,
@@ -120,6 +152,8 @@ class MarketDataAgent:
                 'prices': records[-30:],  # Last 30 data points
                 'status': 'success'
             }
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Error fetching historical data for {ticker}: {e}")
             return {
@@ -138,11 +172,16 @@ class MarketDataAgent:
         Returns:
             Dictionary with company info
         """
+        cache_key = f"company_info:{ticker.upper()}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
             
-            return {
+            result = {
                 'ticker': ticker,
                 'name': info.get('longName', info.get('shortName', ticker)),
                 'sector': info.get('sector'),
@@ -173,6 +212,8 @@ class MarketDataAgent:
                 'status': 'success',
                 'timestamp': datetime.now().isoformat()
             }
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Error fetching company info for {ticker}: {e}")
             return {
@@ -191,6 +232,11 @@ class MarketDataAgent:
         Returns:
             Dictionary with financial data
         """
+        cache_key = f"financials:{ticker.upper()}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        
         try:
             stock = yf.Ticker(ticker)
             
@@ -212,7 +258,7 @@ class MarketDataAgent:
                             result[period][str(idx)] = float(val)
                 return result
             
-            return {
+            result = {
                 'ticker': ticker,
                 'income_statement': df_to_dict(income, 'income'),
                 'balance_sheet': df_to_dict(balance, 'balance'),
@@ -220,6 +266,8 @@ class MarketDataAgent:
                 'status': 'success',
                 'timestamp': datetime.now().isoformat()
             }
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Error fetching financials for {ticker}: {e}")
             return {
@@ -238,6 +286,11 @@ class MarketDataAgent:
         Returns:
             Dictionary with analyst data
         """
+        cache_key = f"analyst:{ticker.upper()}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        
         try:
             stock = yf.Ticker(ticker)
             
@@ -251,7 +304,7 @@ class MarketDataAgent:
             # Get info for targets
             info = stock.info
             
-            return {
+            result = {
                 'ticker': ticker,
                 'target_high': info.get('targetHighPrice'),
                 'target_low': info.get('targetLowPrice'),
@@ -264,6 +317,8 @@ class MarketDataAgent:
                 'status': 'success',
                 'timestamp': datetime.now().isoformat()
             }
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Error fetching analyst data for {ticker}: {e}")
             return {
@@ -282,6 +337,11 @@ class MarketDataAgent:
         Returns:
             Dictionary with earnings estimates
         """
+        cache_key = f"earnings_estimates:{ticker.upper()}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
@@ -314,7 +374,7 @@ class MarketDataAgent:
             except:
                 pass
             
-            return {
+            result = {
                 'ticker': ticker,
                 'current_eps': info.get('trailingEps'),
                 'forward_eps': info.get('forwardEps'),
@@ -334,6 +394,8 @@ class MarketDataAgent:
                 'status': 'success',
                 'timestamp': datetime.now().isoformat()
             }
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Error fetching earnings estimates for {ticker}: {e}")
             return {
@@ -352,6 +414,11 @@ class MarketDataAgent:
         Returns:
             Dictionary with forward guidance and projections
         """
+        cache_key = f"forward_guidance:{ticker.upper()}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
@@ -364,7 +431,7 @@ class MarketDataAgent:
             if current_price and target_mean:
                 upside_potential = round(((target_mean - current_price) / current_price) * 100, 2)
             
-            return {
+            result = {
                 'ticker': ticker,
                 'company_name': info.get('longName'),
                 
@@ -413,6 +480,8 @@ class MarketDataAgent:
                 # Disclaimer
                 'disclaimer': 'Forward-looking data is based on analyst estimates and may not reflect actual future performance.'
             }
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Error fetching forward guidance for {ticker}: {e}")
             return {

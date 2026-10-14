@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Search, Clock, FileText, Calculator, ShieldCheck, Loader2,
   TrendingUp, Building2, Calendar, CheckCircle2, AlertCircle,
-  XCircle, ChevronDown, Activity, Database, Cpu, ArrowUpRight, ArrowDownRight, RefreshCw, DollarSign
+  XCircle, ChevronDown, Activity, Database, Cpu, ArrowUpRight, ArrowDownRight, DollarSign
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -217,9 +217,17 @@ function ResultCard({ result }: { result: AnalysisResult }) {
   )
 }
 
-function LivePriceWidget({ ticker, price }: { ticker: string; price: LivePrice | null }) {
-  const [refreshing, setRefreshing] = useState(false)
+function LivePriceWidget({ price, loading = false }: { price: LivePrice | null; loading?: boolean }) {
   
+  if (loading) {
+    return (
+      <div className="bg-gradient-to-r from-gray-100 to-gray-50 rounded-2xl p-4 animate-pulse">
+        <div className="h-6 w-24 bg-gray-200 rounded mb-2" />
+        <div className="h-8 w-32 bg-gray-200 rounded" />
+      </div>
+    )
+  }
+
   if (!price || price.status !== 'success') {
     return (
       <div className="bg-gradient-to-r from-gray-100 to-gray-50 rounded-2xl p-4 animate-pulse">
@@ -228,7 +236,7 @@ function LivePriceWidget({ ticker, price }: { ticker: string; price: LivePrice |
       </div>
     )
   }
-  
+
   const isPositive = price.change >= 0
   
   return (
@@ -281,16 +289,15 @@ export default function App() {
   const [analysisDate, setAnalysisDate] = useState('2025-10-01')
   const [tickers, setTickers] = useState<Ticker[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
-  const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [currentStage, setCurrentStage] = useState(0)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null)
-  const [priceLoading, setPriceLoading] = useState(false)
 
   // Fetch live price when ticker changes
   const fetchLivePrice = useCallback(async (t: string) => {
-    setPriceLoading(true)
+    setLoading(true)
     try {
       const res = await fetch(`/api/market/price/${t}`)
       const data = await res.json()
@@ -298,7 +305,7 @@ export default function App() {
     } catch (err) {
       console.error('Failed to fetch live price:', err)
     }
-    setPriceLoading(false)
+    setLoading(false)
   }, [])
 
   // Fetch price on ticker change
@@ -333,6 +340,12 @@ export default function App() {
 
   // Poll for job status
   const pollJob = useCallback(async (jobId: string) => {
+    if (!jobId) {
+      setError('Analysis request did not return a job ID')
+      setLoading(false)
+      return
+    }
+
     let attempts = 0
     const maxAttempts = 240 // 8 minutes max (local LLM is slow)
     
@@ -390,11 +403,21 @@ export default function App() {
           model_name: 'llama3.2'
         })
       })
-      
+
       const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to submit query')
+      }
+
+      if (!data?.job_id) {
+        throw new Error('Backend did not return a job ID')
+      }
+
       pollJob(data.job_id)
     } catch (err) {
-      setError('Failed to submit query')
+      const message = err instanceof Error ? err.message : 'Failed to submit query'
+      setError(message)
       setLoading(false)
     }
   }
@@ -507,7 +530,7 @@ export default function App() {
         {/* Live Price Widget */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="md:col-span-1">
-            <LivePriceWidget ticker={ticker} price={livePrice} />
+            <LivePriceWidget price={livePrice} loading={loading} />
           </div>
           <div className="md:col-span-2">
             <Card className="h-full">

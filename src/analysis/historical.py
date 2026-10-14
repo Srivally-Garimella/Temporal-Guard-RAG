@@ -516,33 +516,26 @@ class HistoricalAnalyzer:
         
         try:
             df = pd.read_csv(metrics_path)
-            
-            # Filter by metric
-            metric_df = df[df['metric'] == metric].copy()
-            
+
+            metric_df = df[df['metric'] == metric].copy() if metric else df.copy()
+
             if metric_df.empty:
                 logger.warning(f"No data found for metric '{metric}' in {ticker}")
                 return []
-            
-            # Extract year from end_date
+
             metric_df['year'] = pd.to_datetime(metric_df['end_date']).dt.year
-            
-            # Filter by year range
+
             if start_year:
                 metric_df = metric_df[metric_df['year'] >= start_year]
             if end_year:
                 metric_df = metric_df[metric_df['year'] <= end_year]
-            
-            # Get unique year values (take latest filing per year)
-            metric_df = metric_df.sort_values('filed_date', ascending=False)
+
+            metric_df = metric_df.sort_values(['year', 'filed_date'], ascending=[True, False])
             metric_df = metric_df.drop_duplicates(subset='year', keep='first')
-            
-            # Convert to list of tuples
-            result = [(str(row['year']), row['value']) for _, row in metric_df.iterrows()]
-            result = sorted(result, key=lambda x: x[0])
-            
-            return result
-            
+
+            result = [(str(year), value) for year, value in zip(metric_df['year'], metric_df['value'])]
+            return sorted(result, key=lambda x: x[0])
+
         except Exception as e:
             logger.error(f"Error loading metric history: {e}")
             return []
