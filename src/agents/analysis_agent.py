@@ -10,6 +10,7 @@ A comprehensive agent that handles:
 
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
+from contextvars import ContextVar
 import json
 import logging
 import re
@@ -97,7 +98,10 @@ When asked about future metrics:
         self.llm = get_llm(provider=provider, model_name=model_name, temperature=0)
 
         # Request-scoped context (set per analyze call)
-        self._analysis_date: Optional[str] = None
+        self._analysis_date_context: ContextVar[Optional[str]] = ContextVar(
+            f"analysis_date_{id(self)}",
+            default=None,
+        )
         
         # Create tools
         self._setup_tools()
@@ -113,6 +117,14 @@ When asked about future metrics:
         except Exception as e:
             logger.warning(f"Could not create agent: {e}")
             self.agent = None
+
+    @property
+    def _analysis_date(self) -> Optional[str]:
+        return self._analysis_date_context.get()
+
+    @_analysis_date.setter
+    def _analysis_date(self, value: Optional[str]) -> None:
+        self._analysis_date_context.set(value)
     
     def _setup_tools(self):
         """Setup tools for the agent."""
@@ -214,30 +226,13 @@ When asked about future metrics:
             list_available_metrics
         ]
 
-    def _analysis_year_cutoff(self) -> Optional[int]:
-        """
-        Conservative as-of cutoff for annual metrics.
-
-        If analysis_date is set (YYYYMMDD), we only use historical years <= (analysis_year - 1)
-        to reduce look-ahead leakage when users ask "as of" a date within a year.
-        """
-        if not self._analysis_date:
-            return None
-        try:
-            year = int(str(self._analysis_date)[:4])
-            return year - 1
-        except Exception:
-            return None
-
     def _filter_history_asof(self, history: List[Tuple[int, float]]) -> List[Tuple[int, float]]:
-        cutoff = self._analysis_year_cutoff()
-        if cutoff is None:
-            return history
-        filtered = [(int(y), v) for y, v in history if int(y) <= cutoff]
-        return filtered
+        return [(int(str(year)[:4]), value) for year, value in history]
 
     def _latest_value_asof(self, ticker: str, metric: str) -> Tuple[Optional[int], Optional[float]]:
-        history_raw = self.data_loader.get_metric_history(ticker, metric)
+        history_raw = self.data_loader.get_metric_history(
+            ticker, metric, as_of_date=self._analysis_date
+        )
         history = [(int(y), v) for y, v in history_raw] if history_raw else []
         history = self._filter_history_asof(history)
         if not history:
@@ -254,7 +249,9 @@ When asked about future metrics:
         ticker = ticker.strip().upper()
         
         try:
-            summary = self.data_loader.get_financial_summary(ticker)
+            summary = self.data_loader.get_financial_summary(
+                ticker, as_of_date=self._analysis_date
+            )
             
             lines = [
                 f"📊 Financial Data for {summary.get('company', ticker)}",
@@ -320,15 +317,21 @@ When asked about future metrics:
         std_metric = metric_map.get(metric.lower(), metric)
         
         # Load historical data
-        history_raw = self.data_loader.get_metric_history(ticker, std_metric)
+        history_raw = self.data_loader.get_metric_history(
+            ticker, std_metric, as_of_date=self._analysis_date
+        )
         history = [(int(y), v) for y, v in history_raw] if history_raw else []
         history = self._filter_history_asof(history)
         
         if not history:
             # Try to calculate FCF from OCF and CapEx
             if std_metric in ["FreeCashFlow", "FCF"]:
-                ocf_history_raw = self.data_loader.get_metric_history(ticker, "OperatingCashFlow")
-                capex_history_raw = self.data_loader.get_metric_history(ticker, "CapitalExpenditures")
+                ocf_history_raw = self.data_loader.get_metric_history(
+                    ticker, "OperatingCashFlow", as_of_date=self._analysis_date
+                )
+                capex_history_raw = self.data_loader.get_metric_history(
+                    ticker, "CapitalExpenditures", as_of_date=self._analysis_date
+                )
                 ocf_history = self._filter_history_asof([(int(y), v) for y, v in ocf_history_raw]) if ocf_history_raw else []
                 capex_history = self._filter_history_asof([(int(y), v) for y, v in capex_history_raw]) if capex_history_raw else []
                 
@@ -441,7 +444,9 @@ When asked about future metrics:
         std_metric = metric_map.get(metric.lower(), metric)
         
         # Load data
-        history_raw = self.data_loader.get_metric_history(ticker, std_metric)
+        history_raw = self.data_loader.get_metric_history(
+            ticker, std_metric, as_of_date=self._analysis_date
+        )
         history = [(int(y), v) for y, v in history_raw] if history_raw else []
         history = self._filter_history_asof(history)
         
@@ -543,7 +548,9 @@ When asked about future metrics:
         ticker, metric = [p.strip() for p in parts]
         ticker = ticker.upper()
         
-        history_raw = self.data_loader.get_metric_history(ticker, metric)
+        history_raw = self.data_loader.get_metric_history(
+            ticker, metric, as_of_date=self._analysis_date
+        )
         history = [(int(y), v) for y, v in history_raw] if history_raw else []
         history = self._filter_history_asof(history)
         
@@ -568,7 +575,9 @@ When asked about future metrics:
             return f"Invalid year: {target_year}"
         
         # Load data
-        history_raw = self.data_loader.get_metric_history(ticker, metric)
+        history_raw = self.data_loader.get_metric_history(
+            ticker, metric, as_of_date=self._analysis_date
+        )
         history = [(int(y), v) for y, v in history_raw] if history_raw else []
         history = self._filter_history_asof(history)
         
@@ -600,8 +609,12 @@ When asked about future metrics:
         ticker = ticker.strip().upper()
         
         # Get required data
-        ocf_history_raw = self.data_loader.get_metric_history(ticker, "OperatingCashFlow")
-        capex_history_raw = self.data_loader.get_metric_history(ticker, "CapitalExpenditures")
+        ocf_history_raw = self.data_loader.get_metric_history(
+            ticker, "OperatingCashFlow", as_of_date=self._analysis_date
+        )
+        capex_history_raw = self.data_loader.get_metric_history(
+            ticker, "CapitalExpenditures", as_of_date=self._analysis_date
+        )
         ocf_history = self._filter_history_asof([(int(y), v) for y, v in ocf_history_raw]) if ocf_history_raw else []
         capex_history = self._filter_history_asof([(int(y), v) for y, v in capex_history_raw]) if capex_history_raw else []
         
@@ -614,7 +627,11 @@ When asked about future metrics:
         current_fcf = latest_ocf - latest_capex
         
         # Get market data for shares outstanding
-        market_data = self.stock_loader.get_current_price(ticker)
+        market_data = (
+            self.stock_loader.get_current_price(ticker)
+            if not self._analysis_date or self._analysis_date == datetime.now().strftime("%Y%m%d")
+            else {}
+        )
         market_cap = market_data.get("market_cap", 0)
         current_price = market_data.get("price", 0)
         
@@ -700,6 +717,9 @@ When asked about future metrics:
     def _get_market_data(self, ticker: str) -> str:
         """Get current market data."""
         ticker = ticker.strip().upper()
+
+        if self._analysis_date and self._analysis_date != datetime.now().strftime("%Y%m%d"):
+            return f"Current market data is unavailable for historical as-of date {self._analysis_date}."
         
         data = self.stock_loader.get_current_price(ticker)
         estimates = self.stock_loader.get_analyst_estimates(ticker)
@@ -787,7 +807,7 @@ When asked about future metrics:
             Analysis results
         """
         start_time = datetime.now()
-        self._analysis_date = analysis_date
+        self._analysis_date = analysis_date or datetime.now().strftime("%Y%m%d")
         
         # Try to extract ticker from query if not provided
         if not ticker:

@@ -43,3 +43,21 @@ def test_fallback_mechanism_sets_mode():
     assert out["mode"] == "fallback"
     assert "profit_margin" in out["output"]
     assert "[WARNING: MOCK DATA USED" in out["output"]
+
+
+def test_metric_lookup_excludes_results_filed_after_as_of_date(tmp_path):
+    """A period end before the cutoff is insufficient if its filing came later."""
+    metrics_path = tmp_path / "AAPL_metrics.csv"
+    metrics_path.write_text(
+        "ticker,metric,value,end_date,filed_date,form\n"
+        "AAPL,Revenue,100,2022-09-30,2022-11-01,10-K\n"
+        "AAPL,Revenue,200,2023-09-30,2024-11-01,10-K\n",
+        encoding="utf-8",
+    )
+    agent = CalculationAgent(xbrl_dir=str(tmp_path), provider="ollama")
+
+    result = agent._get_metric_value("AAPL|Revenue|20240101")
+
+    assert "Value: $100" in result
+    assert "Filed: 2022-11-01" in result
+    assert "$200" not in result

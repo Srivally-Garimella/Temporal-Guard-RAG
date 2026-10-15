@@ -338,8 +338,23 @@ class FinancialDataLoader:
     # CONVENIENCE METHODS
     # ═══════════════════════════════════════════════════════════════════
     
-    def get_metric_history(self, ticker: str, metric: str) -> List[Tuple[str, float]]:
-        """Get time series for a specific metric."""
+    @staticmethod
+    def _filed_by_cutoff(info: Dict, as_of_date: str) -> bool:
+        filed_date = info.get("filed") or info.get("filed_date")
+        if not filed_date:
+            return False
+
+        try:
+            cutoff = datetime.strptime(str(as_of_date).replace("-", "")[:8], "%Y%m%d")
+            filed = datetime.strptime(str(filed_date)[:10].replace("-", ""), "%Y%m%d")
+        except ValueError:
+            return False
+
+        return filed <= cutoff
+
+    def get_metric_history(self, ticker: str, metric: str,
+                           as_of_date: Optional[str] = None) -> List[Tuple[str, float]]:
+        """Get metric observations, optionally limited by their filing date."""
         data = self.load_company_data(ticker)
         
         metric_data = data.get("time_series", {}).get(metric, {})
@@ -354,15 +369,18 @@ class FinancialDataLoader:
         result = []
         for year, info in sorted(metric_data.items()):
             if isinstance(info, dict):
+                if as_of_date and not self._filed_by_cutoff(info, as_of_date):
+                    continue
                 result.append((year, info.get("value", 0)))
-            else:
+            elif not as_of_date:
                 result.append((year, info))
         
         return result
     
-    def get_latest_value(self, ticker: str, metric: str) -> Tuple[Optional[str], Optional[float]]:
+    def get_latest_value(self, ticker: str, metric: str,
+                         as_of_date: Optional[str] = None) -> Tuple[Optional[str], Optional[float]]:
         """Get the most recent value for a metric."""
-        history = self.get_metric_history(ticker, metric)
+        history = self.get_metric_history(ticker, metric, as_of_date=as_of_date)
         if history:
             return history[-1]
         return None, None
@@ -372,16 +390,30 @@ class FinancialDataLoader:
         data = self.load_company_data(ticker)
         return list(data.get("time_series", {}).keys())
     
-    def get_financial_summary(self, ticker: str) -> Dict:
+    def get_financial_summary(self, ticker: str, as_of_date: Optional[str] = None) -> Dict:
         """Get a summary of key financial metrics."""
         data = self.load_company_data(ticker)
+
+        summary_data = data
+        if as_of_date:
+            summary_data = dict(data)
+            for category in ("balance_sheet", "income_statement", "cash_flow", "time_series"):
+                summary_data[category] = {
+                    metric: {
+                        period: info
+                        for period, info in values.items()
+                        if isinstance(info, dict) and self._filed_by_cutoff(info, as_of_date)
+                    }
+                    for metric, values in data.get(category, {}).items()
+                }
+            summary_data["ratios"] = self._calculate_ratios(summary_data)
         
         summary = {
             "ticker": ticker,
             "company": data.get("metadata", {}).get("entity_name", ticker),
             "latest_data": {},
-            "ratios": data.get("ratios", {}),
-            "available_metrics": len(data.get("time_series", {})),
+            "ratios": summary_data.get("ratios", {}),
+            "available_metrics": len(summary_data.get("time_series", {})),
         }
         
         # Get latest values for key metrics
@@ -389,7 +421,7 @@ class FinancialDataLoader:
                       "OperatingCashFlow", "EPS_Diluted"]
         
         for metric in key_metrics:
-            year, value = self.get_latest_value(ticker, metric)
+            year, value = self.get_latest_value(ticker, metric, as_of_date=as_of_date)
             if value is not None:
                 summary["latest_data"][metric] = {"year": year, "value": value}
         

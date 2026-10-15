@@ -3,13 +3,16 @@ FastAPI Backend for TemporalGuard-RAG
 """
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import logging
 import asyncio
 import uuid
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -36,12 +39,18 @@ jobs: Dict[str, Dict] = {}
 
 
 class QueryRequest(BaseModel):
-    query: str
-    ticker: str
-    analysis_date: str  # YYYYMMDD format
+    query: str = Field(min_length=1, max_length=2000)
+    ticker: str = Field(min_length=1, max_length=10, pattern=r"^[A-Za-z0-9.-]+$")
+    analysis_date: str = Field(pattern=r"^\d{8}$")
     provider: str = "ollama"
     model_name: str = "llama3.2"
     fast_mode: bool = True  # Skip slow LLM verification by default
+
+    @field_validator("analysis_date")
+    @classmethod
+    def validate_analysis_date(cls, value):
+        datetime.strptime(value, "%Y%m%d")
+        return value
 
 
 class QueryResponse(BaseModel):
@@ -119,7 +128,8 @@ async def run_analysis(job_id: str, query: str, ticker: str, analysis_date: str,
         
     except Exception as e:
         jobs[job_id]["status"] = "failed"
-        jobs[job_id]["error"] = str(e)
+        logger.exception("Analysis job %s failed", job_id)
+        jobs[job_id]["error"] = "Analysis failed due to an internal error."
 
 
 @app.get("/")
@@ -193,10 +203,11 @@ async def get_stats():
             "status": "ready"
         }
     except Exception as e:
+        logger.exception("Could not read vector store statistics")
         return {
             "document_count": 0,
             "status": "error",
-            "error": str(e)
+            "error": "Vector store statistics are unavailable."
         }
 
 
@@ -354,4 +365,4 @@ async def answer_market_question(request: dict):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)

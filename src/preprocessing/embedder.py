@@ -52,7 +52,7 @@ class TemporalEmbedder:
         }
     }
     
-    def __init__(self, model_name: str = "sentence-transformers/all-mpnet-base-v2",
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
                  device: str = None):
         """
         Initialize Temporal Embedder.
@@ -339,7 +339,7 @@ class TemporalEmbedder:
 # Usage
 if __name__ == "__main__":
     # Initialize embedder
-    embedder = TemporalEmbedder(model_name='mpnet')
+    embedder = TemporalEmbedder(model_name='minilm')
     
     # Check if chunks exist
     chunks_path = Path("data/processed/chunks/temporal_chunks.jsonl")

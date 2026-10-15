@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 from typing import List
+from dotenv import load_dotenv
 
 from src.data_collection import (
     SECDataCollector,
@@ -29,6 +30,8 @@ from src.data_collection import (
     IRDocumentCollector,
 )
 from src.data_collection.yahoo_finance import YahooFinanceCollector
+
+load_dotenv()
 
 
 def _load_tickers(args_tickers: List[str], company_list_path: str) -> List[str]:

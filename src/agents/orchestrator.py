@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Query type patterns
 PROJECTION_PATTERNS = [
     'project', 'forecast', 'predict', 'expected', 'estimate',
-    'will be', 'going to be', 'future', '2025', '2026', '2027', '2028', '2029', '2030'
+    'will be', 'going to be', 'future'
 ]
 HISTORICAL_EXTREME_PATTERNS = [
     'highest', 'lowest', 'maximum', 'minimum', 'max', 'min', 
@@ -269,12 +269,36 @@ Keep it simple and readable."""
         # ═══════════════════════════════════════════════════════════════
         update_progress(1, "Temporal Validation")
             
-        temporal_result = self._run_temporal_validation(query, analysis_date)
-        results['stages']['temporal'] = temporal_result
-
         # Classify query and route appropriately
         query_type = self._classify_query(query)
         results['metadata']['query_type'] = query_type
+        temporal_result = self._run_temporal_validation(
+            query,
+            analysis_date,
+            allow_future_target=query_type == 'projection',
+        )
+        results['stages']['temporal'] = temporal_result
+
+        if not temporal_result.get('is_valid', False):
+            reason = temporal_result.get('bias_detection') or temporal_result.get('error')
+            results['final_answer'] = (
+                "Analysis blocked because temporal validation could not confirm that "
+                f"the requested information was available as of {analysis_date}. {reason or ''}"
+            ).strip()
+            results['final'] = self._wrap_final_answer(
+                query_type=query_type,
+                analysis_date=analysis_date,
+                final_answer=results['final_answer'],
+                stages=results['stages'],
+            )
+            results['metadata'].update({
+                'temporal_rejected': True,
+                'processing_time_seconds': (datetime.now() - start_time).total_seconds(),
+                'timestamp': datetime.now().isoformat(),
+                'model': self.model_name,
+                'agents_used': ['temporal'],
+            })
+            return results
         
         # Route projection/forecast queries to Analysis Agent
         if query_type in ['projection', 'historical_extreme', 'ratio']:
@@ -415,15 +439,22 @@ Keep it simple and readable."""
             "warnings": warnings,
         }
         
-    def _run_temporal_validation(self, query: str, analysis_date: str) -> Dict:
+    def _run_temporal_validation(self, query: str, analysis_date: str,
+                                 allow_future_target: bool = False) -> Dict:
         """Run temporal validation."""
         try:
-            return self.temporal_agent.validate_query(query, analysis_date)
+            return self.temporal_agent.validate_query(
+                query,
+                analysis_date,
+                allow_future_target=allow_future_target,
+            )
         except Exception as e:
             logger.error(f"Temporal validation error: {e}")
             return {
-                'is_valid': True,  # Assume valid on error to continue
-                'error': str(e)
+                'is_valid': False,
+                'has_violations': True,
+                'error': str(e),
+                'bias_detection': 'Temporal validation failed; analysis was blocked.',
             }
             
     def _run_document_retrieval(self, query: str, ticker: str, cutoff_date: str) -> Dict:
@@ -686,6 +717,7 @@ Keep it simple and readable."""
         update_progress(1, "Loading Financial Data")
         
         try:
+            self.analysis_agent._analysis_date = analysis_date
             data_summary = self.analysis_agent._load_financial_data(ticker)
             results['stages']['data_loading'] = {
                 'output': data_summary,
@@ -721,7 +753,7 @@ Keep it simple and readable."""
         # ═══════════════════════════════════════════════════════════════
         # STAGE 3: Market Context (for projections)
         # ═══════════════════════════════════════════════════════════════
-        if query_type == 'projection':
+        if query_type == 'projection' and analysis_date == datetime.now().strftime('%Y%m%d'):
             update_progress(3, "Adding Market Context")
             
             try:

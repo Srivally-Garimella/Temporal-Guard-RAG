@@ -6,14 +6,17 @@ REST API for financial analysis with temporal consistency.
 
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from dotenv import load_dotenv
 import uvicorn
 import os
 import logging
 from pathlib import Path
+
+load_dotenv()
 
 # Add project root to path
 import sys
@@ -35,7 +38,12 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,8 +55,8 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     """Request model for financial query."""
-    query: str = Field(..., description="Financial query to analyze")
-    ticker: str = Field(..., description="Company ticker symbol", max_length=10)
+    query: str = Field(..., min_length=1, max_length=2000, description="Financial query to analyze")
+    ticker: str = Field(..., min_length=1, max_length=10, pattern=r"^[A-Za-z0-9.-]+$", description="Company ticker symbol")
     analysis_date: Optional[str] = Field(
         default=None, 
         description="Point-in-time date (YYYYMMDD). Optional - defaults to today. Use for backtesting: 'What would I have known on this date?'"
@@ -58,8 +66,8 @@ class QueryRequest(BaseModel):
         description="Optional configuration"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "query": "What was Apple's revenue growth in fiscal 2023?",
                 "ticker": "AAPL",
@@ -70,29 +78,56 @@ class QueryRequest(BaseModel):
                 }
             }
         }
+    }
+
+    @field_validator("analysis_date")
+    @classmethod
+    def validate_analysis_date(cls, value):
+        if value is not None:
+            datetime.strptime(value, "%Y%m%d")
+        return value
 
 
 class TemporalValidationRequest(BaseModel):
     """Request for temporal validation only."""
-    query: str = Field(..., description="Query to validate")
+    query: str = Field(..., min_length=1, max_length=2000, description="Query to validate")
     analysis_date: Optional[str] = Field(
         default=None,
         description="Point-in-time date (YYYYMMDD). Defaults to today if not specified."
     )
 
+    @field_validator("analysis_date")
+    @classmethod
+    def validate_analysis_date(cls, value):
+        if value is not None:
+            datetime.strptime(value, "%Y%m%d")
+        return value
+
 
 class CalculationRequest(BaseModel):
     """Request for financial calculation."""
-    ticker: str = Field(..., description="Company ticker")
-    ratio: str = Field(..., description="Ratio to calculate (ROE, ROA, debt_ratio, etc.)")
-    date: str = Field(..., description="As-of date (YYYYMMDD)")
+    ticker: str = Field(..., min_length=1, max_length=10, pattern=r"^[A-Za-z0-9.-]+$", description="Company ticker")
+    ratio: str = Field(..., min_length=1, max_length=40, description="Ratio to calculate (ROE, ROA, debt_ratio, etc.)")
+    date: str = Field(..., pattern=r"^\d{8}$", description="As-of date (YYYYMMDD)")
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value):
+        datetime.strptime(value, "%Y%m%d")
+        return value
 
 
 class VerificationRequest(BaseModel):
     """Request for claim verification."""
-    claim: str = Field(..., description="Claim to verify")
-    ticker: str = Field(..., description="Company ticker")
-    filing_date: str = Field(..., description="Filing date cutoff")
+    claim: str = Field(..., min_length=1, max_length=2000, description="Claim to verify")
+    ticker: str = Field(..., min_length=1, max_length=10, pattern=r"^[A-Za-z0-9.-]+$", description="Company ticker")
+    filing_date: str = Field(..., pattern=r"^\d{8}$", description="Filing date cutoff")
+
+    @field_validator("filing_date")
+    @classmethod
+    def validate_filing_date(cls, value):
+        datetime.strptime(value, "%Y%m%d")
+        return value
 
 
 class QueryResponse(BaseModel):
@@ -243,7 +278,7 @@ async def analyze_query(request: QueryRequest, background_tasks: BackgroundTasks
         logger.error(f"Analysis failed: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Analysis failed: {str(e)}"
+            detail="Analysis failed due to an internal error."
         )
 
 
@@ -273,7 +308,8 @@ async def validate_temporal(request: TemporalValidationRequest):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Temporal validation endpoint failed")
+        raise HTTPException(status_code=500, detail="Temporal validation failed.")
 
 
 @app.post("/api/v1/calculate")
@@ -294,8 +330,8 @@ async def calculate_ratio(request: CalculationRequest):
         agent = CalculationAgent()
         
         result = agent.calculate(
+            metric=request.ratio,
             ticker=request.ticker,
-            ratio=request.ratio,
             date=request.date
         )
         
@@ -309,7 +345,8 @@ async def calculate_ratio(request: CalculationRequest):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Calculation endpoint failed")
+        raise HTTPException(status_code=500, detail="Calculation failed.")
 
 
 @app.post("/api/v1/verify")
@@ -339,7 +376,8 @@ async def verify_claim(request: VerificationRequest):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Verification endpoint failed")
+        raise HTTPException(status_code=500, detail="Verification failed.")
 
 
 @app.get("/api/v1/tickers")
@@ -404,7 +442,7 @@ async def get_recent_audit_events(
         
     except Exception as e:
         logger.error(f"Could not fetch audit events: {e}")
-        return {"events": [], "count": 0, "error": str(e)}
+        return {"events": [], "count": 0, "error": "Audit events are unavailable."}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -465,7 +503,7 @@ async def shutdown_event():
 if __name__ == "__main__":
     uvicorn.run(
         "api:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
         reload=True,
         log_level="info"

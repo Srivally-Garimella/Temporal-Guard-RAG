@@ -222,14 +222,18 @@ Note: This is mock data. Connect XBRL collector for real data.
             try:
                 df = pd.read_csv(metrics_path)
                 df['end_date'] = pd.to_datetime(df['end_date'])
+                if 'filed_date' not in df.columns:
+                    return f"No {metric} data with filing-date provenance found for {ticker}"
+                df['filed_date'] = pd.to_datetime(df['filed_date'], errors='coerce')
                 
                 target_date = pd.to_datetime(date)
                 
                 # Filter by metric and date (on or before)
                 filtered = df[
                     (df['metric'] == metric) & 
-                    (df['end_date'] <= target_date)
-                ].sort_values('end_date', ascending=False)
+                    (df['end_date'] <= target_date) &
+                    (df['filed_date'] <= target_date)
+                ].sort_values(['end_date', 'filed_date'], ascending=False)
                 
                 if filtered.empty:
                     return f"No {metric} data found for {ticker} before {date}"

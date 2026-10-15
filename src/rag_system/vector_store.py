@@ -111,6 +111,7 @@ class TemporalVectorStore:
                 self.embedding_model,
                 local_files_only=not allow_download,
             )
+            self.embedding_dim = self.embedder.get_sentence_embedding_dimension()
             return
         except Exception as e:
             logger.warning(f"Could not load SentenceTransformer model ({self.embedding_model}): {e}")
@@ -140,6 +141,13 @@ class TemporalVectorStore:
         # Load embeddings
         logger.info(f"Loading embeddings from {embeddings_path}...")
         embeddings = np.load(embeddings_path)
+
+        if embeddings.ndim != 2 or embeddings.shape[1] != self.embedding_dim:
+            actual_dim = embeddings.shape[1] if embeddings.ndim == 2 else "not a matrix"
+            raise ValueError(
+                f"Embedding dimension mismatch: expected {self.embedding_dim}, got {actual_dim}. "
+                "Generate embeddings with the same model used by TemporalVectorStore."
+            )
 
         with open(chunks_path, 'r', encoding='utf-8') as chunk_counter:
             chunk_count = sum(1 for _ in chunk_counter)

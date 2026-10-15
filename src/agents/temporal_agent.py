@@ -350,7 +350,8 @@ Status: {status}
             
         return result
         
-    def _detect_look_ahead_bias(self, query_string: str) -> str:
+    def _detect_look_ahead_bias(self, query_string: str,
+                                allow_future_target: bool = False) -> str:
         """Detect potential look-ahead bias in a query."""
         parts = query_string.split('|')
         
@@ -376,7 +377,7 @@ Status: {status}
         
         for year_str in found_years:
             year = int(year_str)
-            if year > analysis_year:
+            if year > analysis_year and not allow_future_target:
                 issues.append(f"Reference to future year {year} (analysis year: {analysis_year})")
             elif year == analysis_year:
                 warnings.append(f"Reference to analysis year {year} - verify data availability")
@@ -399,10 +400,13 @@ Status: {status}
                 quarter_month, quarter_day = self.QUARTER_ENDS[quarter]
                 quarter_end = datetime(year, quarter_month, quarter_day)
                 
-                # Check if data would be available
-                availability = quarter_end + timedelta(days=self.FILING_LAGS['10-Q'])
+                # Q4 is reported in the annual 10-K; Q1-Q3 use 10-Q filings.
+                filing_type = '10-K' if quarter == 4 else '10-Q'
+                availability = quarter_end + timedelta(days=self.FILING_LAGS[filing_type])
                 
-                if availability > analysis_date:
+                if availability > analysis_date and not (
+                    allow_future_target and year > analysis_year
+                ):
                     issues.append(f"Q{quarter} {year} data would not be available at analysis date")
                     
         # Detect suspicious keywords
@@ -438,7 +442,8 @@ Status: {status}
             
         return result
         
-    def validate_query(self, query: str, analysis_date: str = None) -> Dict:
+    def validate_query(self, query: str, analysis_date: str = None,
+                       allow_future_target: bool = False) -> Dict:
         """
         Main method to validate a query for temporal consistency.
         
@@ -452,12 +457,36 @@ Status: {status}
         # Default to today if not specified
         if analysis_date is None:
             analysis_date = datetime.now().strftime('%Y%m%d')
+
+        normalized_date = str(analysis_date).strip().replace('-', '').replace('/', '')
+        try:
+            if len(normalized_date) != 8 or not normalized_date.isdigit():
+                raise ValueError("Expected YYYYMMDD")
+            datetime.strptime(normalized_date, '%Y%m%d')
+            analysis_date = normalized_date
+        except ValueError as e:
+            message = f"❌ INVALID ANALYSIS DATE: {e}"
+            return {
+                'query': query,
+                'analysis_date': str(analysis_date),
+                'cutoff_analysis': message,
+                'bias_detection': message,
+                'has_violations': True,
+                'has_warnings': False,
+                'is_valid': False,
+                'agent': 'TemporalAgent',
+                'processing_time': 0.0,
+                'timestamp': datetime.now().isoformat(),
+            }
             
         start_time = datetime.now()
         
         # Run standard checks
         cutoff_result = self._calculate_information_cutoff(analysis_date)
-        bias_result = self._detect_look_ahead_bias(f"{query}|{analysis_date}")
+        bias_result = self._detect_look_ahead_bias(
+            f"{query}|{analysis_date}",
+            allow_future_target=allow_future_target,
+        )
         
         # Determine overall status
         has_violations = '❌' in bias_result or 'BIAS DETECTED' in bias_result

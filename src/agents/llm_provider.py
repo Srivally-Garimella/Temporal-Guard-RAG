@@ -9,6 +9,9 @@ Supports multiple LLM backends:
 import os
 import logging
 from typing import Optional, Literal
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

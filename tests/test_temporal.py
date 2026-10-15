@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.agents.temporal_agent import TemporalAgent
+from src.analysis.data_loader import FinancialDataLoader
 
 
 class TestTemporalAgent:
@@ -117,6 +118,13 @@ class TestTemporalAgent:
         
         # May have warnings for forward-looking language
         assert 'has_warnings' in result or 'has_violations' in result
+
+    def test_validate_query_rejects_invalid_analysis_date(self, agent):
+        result = agent.validate_query("What was revenue?", "20240230")
+
+        assert result['is_valid'] is False
+        assert result['has_violations'] is True
+        assert 'INVALID ANALYSIS DATE' in result['bias_detection']
         
     def test_get_cutoff_date(self, agent):
         """Test cutoff date calculation."""
@@ -165,6 +173,21 @@ class TestTemporalIntegration:
         )
         
         assert result['is_valid'] is True
+
+
+def test_metric_history_uses_filing_date_for_as_of_filter(tmp_path):
+    metrics_path = tmp_path / "AAPL_metrics.csv"
+    metrics_path.write_text(
+        "metric,end_date,value,filed_date,form\n"
+        "Revenue,2022-09-30,100,2022-11-01,10-K\n"
+        "Revenue,2023-09-30,200,2024-11-01,10-K\n",
+        encoding="utf-8",
+    )
+    loader = FinancialDataLoader(str(tmp_path))
+
+    history = loader.get_metric_history("AAPL", "Revenue", as_of_date="20240101")
+
+    assert history == [("2022-09-30", 100)]
 
 
 if __name__ == "__main__":
